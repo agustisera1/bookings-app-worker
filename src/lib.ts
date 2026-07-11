@@ -23,10 +23,11 @@ type Booking = {
 export type NotificationType = "pending" | "approved" | "rejected" | "updated";
 
 // Mirrors BookingEmailPayload enqueued by the API: only the fields the email
-// template renders, not the full domain entities.
+// template renders, not the full domain entities. `type` selects the lifecycle
+// copy — a single processorKey covers every booking email.
 export type BookingPayload = {
   processorKey: "notify-booking";
-  type?: NotificationType;
+  type: NotificationType;
   guest: { email: string };
   booking: Booking;
   host: { name: string };

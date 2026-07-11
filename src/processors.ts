@@ -17,25 +17,22 @@ const subjects: Record<NotificationType, string> = {
   updated: "Reservation updated",
 };
 
-function getNotificationPayload(
-  data: BookingPayload,
-  type: NotificationType = "updated",
-) {
+function getNotificationPayload(data: BookingPayload) {
   return {
-    subject: `${subjects[type]}: ${data.listing.title}`,
-    html: bookingEmailHtml(data, type),
+    subject: `${subjects[data.type]}: ${data.listing.title}`,
+    html: bookingEmailHtml(data, data.type),
   };
 }
 
+// Every booking email flows through here; `payload.type` selects the lifecycle
+// copy (pending / approved / rejected / updated).
 async function notifyBooking(job: Job) {
   const payload = job.data as BookingPayload;
 
   const { data, error } = await resend.emails.send({
-    ...(devMode
-      ? { from: "onboarding@resend.dev", to: "agustisera1@gmail.com" }
-      : { from: "onboarding@resend.dev", to: [payload.guest.email] }),
-    to: "agustisera1@gmail.com", // Use dev
-    ...getNotificationPayload(payload, payload.type),
+    from: "onboarding@resend.dev",
+    to: devMode ? "agustisera1@gmail.com" : [payload.guest.email],
+    ...getNotificationPayload(payload),
   });
 
   if (data) console.info("[notifyBooking]: booking notification sent");
