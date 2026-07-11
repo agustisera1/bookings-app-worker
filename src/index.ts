@@ -1,17 +1,17 @@
-import { createClient } from "redis";
-import "dotenv/config";
+import { worker, client } from "./redis.js";
 
-const client = createClient({
-  // Provide the worker username secret
-  url: process.env.REDIS_URL,
-});
+// Don't call client.connect() here: BullMQ's node-redis adapter auto-connects
+// the shared client, and a second connect throws "Socket already opened".
 
-client.on("error", (error) => {
-  console.error("Client error", error);
-});
+// Graceful shutdown. worker.close() stops the worker and closes its own
+// (blocking) socket; the shared command client is left open by BullMQ, so we
+// close it ourselves to avoid leaking the connection.
+async function shutdown() {
+  await worker.close();
+  await client.close();
+  process.exit(0);
+}
 
-client.on("connect", () => {
-  console.info("Client listening");
-});
-
-await client.connect();
+// SIGINT -> Ctrl+C; SIGTERM -> docker stop / tsx watch reloads.
+process.once("SIGINT", shutdown);
+process.once("SIGTERM", shutdown);
