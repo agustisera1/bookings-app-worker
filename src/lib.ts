@@ -18,14 +18,51 @@ type Booking = {
   totalPrice: number;
 };
 
+// The lifecycle stage the notification is announcing. Drives both the subject
+// line and the copy variations in the email template.
+export type NotificationType = "pending" | "approved" | "rejected" | "updated";
+
 // Mirrors BookingEmailPayload enqueued by the API: only the fields the email
 // template renders, not the full domain entities.
 export type BookingPayload = {
   processorKey: "notify-booking";
+  type?: NotificationType;
   guest: { email: string };
   booking: Booking;
   host: { name: string };
   listing: { title: string; location: ListingLocation };
+};
+
+// Per-type copy. Kept intentionally simple: only the header, status pill and
+// intro paragraph change; the booking detail grid is shared across all types.
+const notificationCopy: Record<
+  NotificationType,
+  { heading: string; status: string; intro: (host: string) => string }
+> = {
+  pending: {
+    heading: "Booking Received",
+    status: "Status: Pending confirmation",
+    intro: (host) =>
+      `Your reservation is being processed. We'll notify you as soon as <strong>${host}</strong> verifies the payment and details to confirm your stay.`,
+  },
+  approved: {
+    heading: "Booking Confirmed",
+    status: "Status: Approved",
+    intro: (host) =>
+      `Great news — <strong>${host}</strong> has confirmed your reservation. Your stay is all set.`,
+  },
+  rejected: {
+    heading: "Booking Declined",
+    status: "Status: Rejected",
+    intro: (host) =>
+      `Unfortunately, <strong>${host}</strong> could not confirm your reservation. Any payment made will be refunded.`,
+  },
+  updated: {
+    heading: "Booking Updated",
+    status: "Status: Updated",
+    intro: (host) =>
+      `Your reservation details have been updated by <strong>${host}</strong>. Please review the information below.`,
+  },
 };
 
 export function formatDate(date: Date | string) {
@@ -48,12 +85,10 @@ function formatAddress(location: ListingLocation) {
     .join(", ");
 }
 
-export function bookingEmailHtml({
-  guest,
-  booking,
-  host,
-  listing,
-}: BookingPayload) {
+export function bookingEmailHtml(
+  { guest, booking, host, listing }: BookingPayload,
+  type: NotificationType = "updated",
+) {
   const nights = nightsBetween(booking.checkIn, booking.checkOut);
   const total = new Intl.NumberFormat("en-US", {
     style: "currency",
@@ -62,13 +97,14 @@ export function bookingEmailHtml({
 
   const guestName = guest.email.split("@")[0];
   const propertyAddress = formatAddress(listing.location);
+  const copy = notificationCopy[type];
 
   return `<!DOCTYPE html>
 <html lang="en">
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Reservation pending</title>
+    <title>${copy.heading}</title>
   </head>
   <body style="margin:0;padding:0;background-color:#f4f4f4;font-family:'Helvetica Neue',Helvetica,Arial,sans-serif;color:#111111;">
     <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background-color:#f4f4f4;padding:32px 0;">
@@ -78,7 +114,7 @@ export function bookingEmailHtml({
             <!-- Header -->
             <tr>
               <td style="background-color:#111111;padding:28px 40px;">
-                <h1 style="margin:0;font-size:20px;letter-spacing:2px;text-transform:uppercase;color:#ffffff;font-weight:600;">Booking Received</h1>
+                <h1 style="margin:0;font-size:20px;letter-spacing:2px;text-transform:uppercase;color:#ffffff;font-weight:600;">${copy.heading}</h1>
               </td>
             </tr>
 
@@ -87,8 +123,7 @@ export function bookingEmailHtml({
               <td style="padding:40px 40px 24px 40px;">
                 <p style="margin:0 0 16px 0;font-size:16px;line-height:1.6;">Hi ${guestName},</p>
                 <p style="margin:0;font-size:16px;line-height:1.6;color:#333333;">
-                  Your reservation is being processed. We'll notify you as soon as
-                  <strong>${host.name}</strong> verifies the payment and details to confirm your stay.
+                  ${copy.intro(host.name)}
                 </p>
               </td>
             </tr>
@@ -96,7 +131,7 @@ export function bookingEmailHtml({
             <!-- Status pill -->
             <tr>
               <td style="padding:0 40px 32px 40px;">
-                <span style="display:inline-block;padding:8px 16px;border:1px solid #111111;font-size:12px;letter-spacing:1.5px;text-transform:uppercase;color:#111111;">Status: Pending confirmation</span>
+                <span style="display:inline-block;padding:8px 16px;border:1px solid #111111;font-size:12px;letter-spacing:1.5px;text-transform:uppercase;color:#111111;">${copy.status}</span>
               </td>
             </tr>
 
