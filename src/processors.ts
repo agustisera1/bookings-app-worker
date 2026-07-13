@@ -1,12 +1,26 @@
 import { Job } from "bullmq";
 import { resend } from "./resend.js";
-import { BookingPayload, NotificationType, bookingEmailHtml } from "./lib.js";
+import {
+  BookingPayload,
+  GreetingPayload,
+  NotificationType,
+  bookingEmailHtml,
+  greetingEmailHtml,
+} from "./lib.js";
 
 // Mailing processors
 type JobKey = "greet-user" | "notify-booking";
 type Processor = typeof greetUser | typeof notifyBooking;
 
-async function greetUser(job: Job) {}
+async function greetUser(job: Job) {
+  const payload = job.data as GreetingPayload;
+  await resend.emails.send({
+    from: devMode ? "onboarding@resend.dev" : "bookings@app.com", // Swap out to a real verified domain in deployed | prod environment
+    to: devMode ? "agustisera1@gmail.com" : [payload.email], // Just signed up email
+    subject: "Welcome to bookings app!",
+    html: greetingEmailHtml(payload),
+  });
+}
 
 const devMode = Number(process.env.DEV_MODE) === 1;
 
