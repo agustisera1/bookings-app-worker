@@ -1,7 +1,7 @@
 import "dotenv/config";
 import { createClient } from "redis";
 import { Worker, createNodeRedisClient } from "bullmq";
-import { emailsProcessor } from "./processors.js";
+import { emailsProcessor, notificationsProcessor } from "./processors.js";
 
 export const client = createClient({
   // Provide the worker username secret
@@ -17,6 +17,14 @@ client.on("connect", () => {
 });
 
 // Ensure queue name matching with .env variables
-export const worker = new Worker("emails", emailsProcessor, {
+export const emailsWorker = new Worker("emails", emailsProcessor, {
   connection: createNodeRedisClient(client),
 });
+
+export const notificationsWorker = new Worker(
+  "notifications",
+  notificationsProcessor,
+  {
+    connection: createNodeRedisClient(client),
+  },
+);

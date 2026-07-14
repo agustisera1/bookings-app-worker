@@ -10,6 +10,49 @@ export type ListingLocation = {
   country?: string;
 };
 
+// The kind of in-app notification to build. Mirrors InAppNotificationType in
+// the API (lib/events.ts). `type` selects the copy the Mongo row carries and
+// whether it lands already-read.
+export type InAppNotificationType =
+  | "mark_as_read"
+  | "notify_user"
+  | "notify_booking_update";
+
+// Mirrors NotificationJobPayload enqueued by the API (lib/events.ts). Minimal:
+// only the ids the worker rehydrates from, plus the discriminant `type`.
+export type NotificationJobPayload = {
+  processorKey: "send-notification";
+  type: InAppNotificationType;
+  listingId: string;
+  bookingId: string;
+  userId: string;
+};
+
+// Title/body copy per notification type. The titles carry the keywords the
+// in-app list keys its icon off of (see `notificationVisual` in the web app's
+// notifications-list.tsx): "confirm" → the confirmation glyph, and so on. Types
+// with no natural UI category fall back to the generic bell.
+export const notificationContent: Record<
+  InAppNotificationType,
+  { title: string; body: (listingTitle: string) => string; isRead: boolean }
+> = {
+  notify_booking_update: {
+    title: "Booking confirmed",
+    body: (listing) => `There's an update on your booking for "${listing}".`,
+    isRead: false,
+  },
+  notify_user: {
+    title: "New notification",
+    body: (listing) => `You have a new update related to "${listing}".`,
+    isRead: false,
+  },
+  mark_as_read: {
+    title: "Notification read",
+    body: (listing) => `Your notification for "${listing}" was marked as read.`,
+    isRead: true,
+  },
+};
+
 type Booking = {
   id: string;
   checkIn: string; // ISO string
