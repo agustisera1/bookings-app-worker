@@ -14,11 +14,16 @@
   "description": "",
   "devDependencies": {
     "@types/node": "^26.1.1",
+    "@types/pg": "^8.20.0",
     "tsx": "^4.23.0",
     "typescript": "^7.0.2"
   },
   "dependencies": {
+    "bullmq": "^5.80.1",
     "dotenv": "^17.4.2",
-    "redis": "^6.1.0"
+    "mongodb": "7.4",
+    "pg": "^8.22.0",
+    "redis": "^6.1.0",
+    "resend": "^6.17.2"
   }
 }
