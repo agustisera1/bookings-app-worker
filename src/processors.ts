@@ -9,9 +9,9 @@ import {
   greetingEmailHtml,
   notificationContent,
 } from "./lib.js";
-import { PgUser, query } from "./pg.js";
-import { ObjectId } from "mongodb";
-import mongo, { ListingDocumentValues } from "./mongo.js";
+import { findListingById, insertNotification } from "./mongo/repository.js";
+import { findUserById } from "./pg/repository.js";
+import { channels, publish } from "./redis/client.js";
 
 // Mailing processors
 type JobKey = "greet-user" | "notify-booking" | "send-notification";
@@ -64,54 +64,42 @@ async function notifyBooking(job: Job) {
   }
 }
 
-export async function getUserById(id: string): Promise<PgUser | null> {
-  const result = await query<PgUser>(
-    `SELECT id, name, email FROM users WHERE id = $1`,
-    [id],
-  );
-  return result.rows[0] ?? null;
-}
-
-async function getListing(listingId: string) {
-  const collection = (await mongo)
-    .db("listingsdb")
-    .collection<ListingDocumentValues>("listings");
-  const doc = await collection.findOne({
-    _id: new ObjectId(listingId),
-  });
-
-  if (!doc) return null;
-  return { ...doc, _id: doc._id.toString() };
-}
-
 export async function sendNotification(job: Job) {
-  try {
-    const payload = job.data as NotificationJobPayload;
-    const userPromise = getUserById(payload.userId);
-    const listingPromise = getListing(payload.listingId);
-    const [user, listing] = await Promise.all([userPromise, listingPromise]);
-    if (!user || !listing) {
-      throw new Error(
-        "[sendNotification]: Could not retrieve user or listing for the specified notification params",
-      );
-    }
-
-    const content = notificationContent[payload.type];
-    const notification = {
-      listing_id: listing._id, // The listing linked from listingsDb.listings
-      host_id: listing.host_id,
-      guest_id: payload.userId, // The user the notification is about
-      booking_id: payload.bookingId,
-      target_id: payload.userId, // The logged in user that should grab this notification
-      title: content.title,
-      body: content.body(listing.title),
-      is_read: content.isRead,
-    };
-
-    console.log("Notification Created", { notification });
-  } catch (error) {
-    console.error(error);
+  const payload = job.data as NotificationJobPayload;
+  const [user, listing] = await Promise.all([
+    findUserById(payload.userId),
+    findListingById(payload.listingId),
+  ]);
+  if (!user || !listing) {
+    throw new Error(
+      "[sendNotification]: Could not retrieve user or listing for the specified notification params",
+    );
   }
+
+  const content = notificationContent[payload.type];
+  const notification = {
+    listing_id: listing._id, // The listing linked from listingsDb.listings
+    host_id: listing.host_id,
+    guest_id: payload.userId, // The user the notification is about
+    booking_id: payload.bookingId,
+    target_id: payload.userId, // The logged in user that should grab this notification
+    title: content.title,
+    body: content.body(listing.title),
+    is_read: content.isRead,
+  };
+
+  // Persist first (Mongo is the source of truth), then fan out. If the insert
+  // fails we never publish, so a live client can't receive an event the DB
+  // lacks — on refetch it would just vanish.
+  const inserted = await insertNotification(notification);
+  if (!inserted) {
+    throw new Error("[sendNotification]: Failed to persist notification");
+  }
+
+  await publish(
+    channels.notifications(notification.target_id),
+    JSON.stringify(notification),
+  );
 }
 
 export async function emailsProcessor(job: Job) {
@@ -123,6 +111,7 @@ export async function emailsProcessor(job: Job) {
     await processor(job);
   } catch (error) {
     console.error("[emailsProcessor]:", job.name, "failed with error", error);
+    throw error; // re-throw so BullMQ marks the job failed and retries it
   }
 }
 
@@ -140,6 +129,7 @@ export async function notificationsProcessor(job: Job) {
       "failed with error",
       error,
     );
+    throw error; // re-throw so BullMQ marks the job failed and retries it
   }
 }
 
