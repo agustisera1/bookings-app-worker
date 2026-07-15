@@ -53,6 +53,10 @@ export const notificationContent: Record<
   },
 };
 
+// The two parties to a booking. Mirrors BookingParty in the API
+// (lib/types/booking.ts).
+export type BookingParty = "guest" | "host";
+
 type Booking = {
   id: string;
   checkIn: string; // ISO string
@@ -60,11 +64,21 @@ type Booking = {
   guests: number;
   totalPrice: number;
   statusReason?: string;
+  // Both set only on `cancelled`. `refundAmount` is what the API's cancellation
+  // policy decided is owed back — the worker renders that number, it never
+  // recomputes it. Re-deriving the policy here is how the two drift apart.
+  refundAmount?: number;
+  cancelledBy?: BookingParty;
 };
 
 // The lifecycle stage the notification is announcing. Drives both the subject
 // line and the copy variations in the email template.
-export type NotificationType = "pending" | "approved" | "rejected" | "updated";
+export type NotificationType =
+  | "pending"
+  | "approved"
+  | "rejected"
+  | "updated"
+  | "cancelled";
 
 // Mirrors BookingEmailPayload enqueued by the API: only the fields the email
 // template renders, not the full domain entities. `type` selects the lifecycle
@@ -85,11 +99,18 @@ export type GreetingPayload = {
   email: string;
 };
 
+function formatMoney(amount: number) {
+  return new Intl.NumberFormat("en-US", {
+    style: "currency",
+    currency: DEFAULT_CURRENCY,
+  }).format(amount);
+}
+
 // Per-type copy. Kept intentionally simple: only the header, status pill and
 // intro paragraph change; the booking detail grid is shared across all types.
 const notificationCopy: Record<
   NotificationType,
-  { heading: string; status: string; intro: (host: string) => string }
+  { heading: string; status: string; intro: (host: string, booking: Booking) => string }
 > = {
   pending: {
     heading: "Booking Received",
@@ -114,6 +135,25 @@ const notificationCopy: Record<
     status: "Status: Updated",
     intro: (host) =>
       `Your reservation details have been updated by <strong>${host}</strong>. Please review the information below.`,
+  },
+  // Always addressed to the guest, but the copy turns on who cancelled: a host
+  // cancelling is an apology, a guest cancelling is a receipt. Says the refund
+  // amount without explaining the rule behind it — that rule lives in the API's
+  // cancellation policy, and restating it here is how the two drift apart.
+  cancelled: {
+    heading: "Booking Cancelled",
+    status: "Status: Cancelled",
+    intro: (host, booking) => {
+      const refund = booking.refundAmount ?? 0;
+      const refundLine =
+        refund > 0
+          ? `A refund of <strong>${formatMoney(refund)}</strong> will be issued.`
+          : "This booking is not eligible for a refund.";
+
+      return booking.cancelledBy === "host"
+        ? `<strong>${host}</strong> has cancelled your reservation, and we're sorry for the disruption. ${refundLine}`
+        : `Your cancellation is confirmed. ${refundLine}`;
+    },
   },
 };
 
@@ -142,23 +182,22 @@ export function bookingEmailHtml(
   type: NotificationType = "updated",
 ) {
   const nights = nightsBetween(booking.checkIn, booking.checkOut);
-  const total = new Intl.NumberFormat("en-US", {
-    style: "currency",
-    currency: DEFAULT_CURRENCY,
-  }).format(booking.totalPrice);
+  const total = formatMoney(booking.totalPrice);
 
   const guestName = guest.email.split("@")[0];
   const propertyAddress = formatAddress(listing.location);
   const copy = notificationCopy[type];
 
-  // Optional host note explaining an approval or rejection. Only rendered for
-  // those two lifecycle types, and only when the API supplied a reason.
+  // Optional note explaining an approval, rejection or cancellation. Only
+  // rendered for those types, and only when the API supplied a reason.
   const reasonLabel =
     type === "approved"
       ? "Note from host"
       : type === "rejected"
         ? "Reason for decline"
-        : null;
+        : type === "cancelled"
+          ? "Reason for cancellation"
+          : null;
   const reasonBlock =
     reasonLabel && booking.statusReason
       ? `
@@ -170,6 +209,29 @@ export function bookingEmailHtml(
                     <td style="padding:16px 20px;">
                       <p style="margin:0 0 4px 0;font-size:12px;letter-spacing:1px;text-transform:uppercase;color:#888888;">${reasonLabel}</p>
                       <p style="margin:0;font-size:15px;line-height:1.6;color:#333333;">${booking.statusReason}</p>
+                    </td>
+                  </tr>
+                </table>
+              </td>
+            </tr>`
+      : "";
+
+  // On a cancellation the total already paid is no longer the number that
+  // matters, so the refund gets its own block right under it. Skipped when
+  // there's nothing to refund: the intro already says so, and a $0.00 box reads
+  // like a bug.
+  const refundAmount = booking.refundAmount ?? 0;
+  const refundBlock =
+    type === "cancelled" && refundAmount > 0
+      ? `
+            <!-- Refund -->
+            <tr>
+              <td style="padding:0 40px 32px 40px;">
+                <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border:1px solid #111111;">
+                  <tr>
+                    <td style="padding:20px 24px;">
+                      <p style="margin:0 0 4px 0;font-size:12px;letter-spacing:1px;text-transform:uppercase;color:#888888;">Refund</p>
+                      <p style="margin:0;font-size:24px;font-weight:700;color:#111111;">${formatMoney(refundAmount)}</p>
                     </td>
                   </tr>
                 </table>
@@ -201,7 +263,7 @@ export function bookingEmailHtml(
               <td style="padding:40px 40px 24px 40px;">
                 <p style="margin:0 0 16px 0;font-size:16px;line-height:1.6;">Hi ${guestName},</p>
                 <p style="margin:0;font-size:16px;line-height:1.6;color:#333333;">
-                  ${copy.intro(host.name)}
+                  ${copy.intro(host.name, booking)}
                 </p>
               </td>
             </tr>
@@ -269,7 +331,7 @@ ${reasonBlock}
                 </table>
               </td>
             </tr>
-
+${refundBlock}
             <!-- Reference -->
             <tr>
               <td style="padding:0 40px 40px 40px;">

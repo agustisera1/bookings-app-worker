@@ -37,6 +37,7 @@ const subjects: Record<NotificationType, string> = {
   pending: "Reservation pending",
   rejected: "Reservation rejected",
   updated: "Reservation updated",
+  cancelled: "Reservation cancelled",
 };
 
 function getEmailNotificationPayload(data: BookingPayload) {
