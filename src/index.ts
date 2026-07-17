@@ -1,6 +1,7 @@
 import "dotenv/config.js";
 import { emailsWorker, notificationsWorker } from "./redis/workers.js";
 import { pubClient } from "./redis/client.js";
+import { io as chatServer } from "./redis/socket.js";
 
 // node-redis emits `error` events; without a listener they throw and can crash
 // the process. Attach before anything connects.
@@ -13,9 +14,15 @@ notificationsWorker.on("error", (err) =>
 // Startup order matters: the notifications processor publishes on `pubClient`,
 // so that connection must be up before the workers start pulling jobs. The
 // workers are created with `autorun: false` precisely so we gate them here.
+// Port the socket.io chat server listens on. From env so it can differ per
+// environment; falls back to 4000 for local dev.
+const socketPort = Number(process.env.SOCKET_PORT) || 4000;
+
 async function initialize() {
   await pubClient.connect();
   console.info("[pubClient]: initialized");
+  chatServer.listen(socketPort);
+  console.info(`[chatServer]: listening on ${socketPort}`);
 
   // run() starts each processing loop; its promise resolves only when the
   // worker closes, so we start them without awaiting.

@@ -70,3 +70,28 @@ export async function insertNotification(
   if (!document.insertedId) return null;
   return document;
 }
+
+// Chat message as persisted (app-generated `_id`) and delivered to clients. The
+// booking's id doubles as `chat_id`.
+export type MessageDocument = {
+  _id: string;
+  chat_id: string;
+  sender_id: string;
+  body: string;
+  timestamp: string; // ISO string
+};
+
+// Persist a chat message. Mongo is the source of truth for the thread, so the
+// socket flow stores here before delivering. TODO: write to the messages
+// collection and return the insert result (null on failure).
+export async function insertMessage(message: MessageDocument) {
+  // const client = await mongo;
+  // const document = await client
+  //   .db("chatdb")
+  //   .collection("messages")
+  //   .insertOne(message);
+  // if (!document.insertedId) return null;
+  // return document;
+  console.info("[insertMessage]: TODO persist message", message._id);
+  return message; // stub: pretend the write succeeded so the flow proceeds
+}

@@ -1,110 +1,6 @@
-// Shared types, formatters and email templates.
-
-// Currency the totals are priced in. Not part of the queue payload, so it lives
-// here as a single source of truth until the schema carries it.
-const DEFAULT_CURRENCY = "USD";
-
-export type ListingLocation = {
-  address?: string;
-  city?: string;
-  country?: string;
-};
-
-// The kind of in-app notification to build. Mirrors InAppNotificationType in
-// the API (lib/events.ts). `type` selects the copy the Mongo row carries and
-// whether it lands already-read.
-export type InAppNotificationType =
-  | "mark_as_read"
-  | "notify_user"
-  | "notify_booking_update";
-
-// Mirrors NotificationJobPayload enqueued by the API (lib/events.ts). Minimal:
-// only the ids the worker rehydrates from, plus the discriminant `type`.
-export type NotificationJobPayload = {
-  processorKey: "send-notification";
-  type: InAppNotificationType;
-  listingId: string;
-  bookingId: string;
-  userId: string;
-};
-
-// Title/body copy per notification type. The titles carry the keywords the
-// in-app list keys its icon off of (see `notificationVisual` in the web app's
-// notifications-list.tsx): "confirm" → the confirmation glyph, and so on. Types
-// with no natural UI category fall back to the generic bell.
-export const notificationContent: Record<
-  InAppNotificationType,
-  { title: string; body: (listingTitle: string) => string; isRead: boolean }
-> = {
-  notify_booking_update: {
-    title: "Booking confirmed",
-    body: (listing) => `There's an update on your booking for "${listing}".`,
-    isRead: false,
-  },
-  notify_user: {
-    title: "New notification",
-    body: (listing) => `You have a new update related to "${listing}".`,
-    isRead: false,
-  },
-  mark_as_read: {
-    title: "Notification read",
-    body: (listing) => `Your notification for "${listing}" was marked as read.`,
-    isRead: true,
-  },
-};
-
-// The two parties to a booking. Mirrors BookingParty in the API
-// (lib/types/booking.ts).
-export type BookingParty = "guest" | "host";
-
-type Booking = {
-  id: string;
-  checkIn: string; // ISO string
-  checkOut: string; // ISO string
-  guests: number;
-  totalPrice: number;
-  statusReason?: string;
-  // Both set only on `cancelled`. `refundAmount` is what the API's cancellation
-  // policy decided is owed back — the worker renders that number, it never
-  // recomputes it. Re-deriving the policy here is how the two drift apart.
-  refundAmount?: number;
-  cancelledBy?: BookingParty;
-};
-
-// The lifecycle stage the notification is announcing. Drives both the subject
-// line and the copy variations in the email template.
-export type NotificationType =
-  | "pending"
-  | "approved"
-  | "rejected"
-  | "updated"
-  | "cancelled";
-
-// Mirrors BookingEmailPayload enqueued by the API: only the fields the email
-// template renders, not the full domain entities. `type` selects the lifecycle
-// copy — a single processorKey covers every booking email.
-export type BookingPayload = {
-  processorKey: "notify-booking";
-  type: NotificationType;
-  guest: { email: string };
-  booking: Booking;
-  host: { name: string };
-  listing: { title: string; location: ListingLocation };
-};
-
-// Mirrors WelcomeEmailPayload enqueued by the API (lib/events.ts). Minimal: the
-// welcome template only greets by email, so that's the sole field on the wire.
-export type GreetingPayload = {
-  processorKey: "greet-user";
-  email: string;
-};
-
-function formatMoney(amount: number) {
-  return new Intl.NumberFormat("en-US", {
-    style: "currency",
-    currency: DEFAULT_CURRENCY,
-  }).format(amount);
-}
+import { Booking, BookingPayload, NotificationType } from "../events.js";
+import { formatDate, nightsBetween } from "../dates.js";
+import { formatAddress, formatMoney } from "../utils.js";
 
 // Per-type copy. Kept intentionally simple: only the header, status pill and
 // intro paragraph change; the booking detail grid is shared across all types.
@@ -156,26 +52,6 @@ const notificationCopy: Record<
     },
   },
 };
-
-export function formatDate(date: Date | string) {
-  return new Date(date).toLocaleDateString("en-US", {
-    weekday: "short",
-    day: "numeric",
-    month: "short",
-    year: "numeric",
-  });
-}
-
-export function nightsBetween(checkIn: Date | string, checkOut: Date | string) {
-  const ms = new Date(checkOut).getTime() - new Date(checkIn).getTime();
-  return Math.max(1, Math.round(ms / (1000 * 60 * 60 * 24)));
-}
-
-function formatAddress(location: ListingLocation) {
-  return [location.address, location.city, location.country]
-    .filter(Boolean)
-    .join(", ");
-}
 
 export function bookingEmailHtml(
   { guest, booking, host, listing }: BookingPayload,
@@ -337,59 +213,6 @@ ${refundBlock}
               <td style="padding:0 40px 40px 40px;">
                 <p style="margin:0;font-size:13px;color:#888888;">
                   Booking reference: <span style="color:#111111;font-family:'Courier New',monospace;letter-spacing:1px;">${booking.id}</span>
-                </p>
-              </td>
-            </tr>
-
-            <!-- Footer -->
-            <tr>
-              <td style="background-color:#f4f4f4;padding:24px 40px;border-top:1px solid #dddddd;">
-                <p style="margin:0;font-size:12px;line-height:1.6;color:#999999;">
-                  This is an automated message. Please do not reply directly to this email.
-                </p>
-              </td>
-            </tr>
-          </table>
-        </td>
-      </tr>
-    </table>
-  </body>
-</html>`;
-}
-
-// Welcome email sent once when a user signs up. Shares the monochrome shell of
-// the booking templates but keeps the body minimal — just a greeting.
-export function greetingEmailHtml({ email }: GreetingPayload) {
-  const userName = email.split("@")[0];
-
-  return `<!DOCTYPE html>
-<html lang="en">
-  <head>
-    <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Welcome</title>
-  </head>
-  <body style="margin:0;padding:0;background-color:#f4f4f4;font-family:'Helvetica Neue',Helvetica,Arial,sans-serif;color:#111111;">
-    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background-color:#f4f4f4;padding:32px 0;">
-      <tr>
-        <td align="center">
-          <table role="presentation" width="600" cellpadding="0" cellspacing="0" style="width:600px;max-width:100%;background-color:#ffffff;border:1px solid #111111;">
-            <!-- Header -->
-            <tr>
-              <td style="background-color:#111111;padding:28px 40px;">
-                <h1 style="margin:0;font-size:20px;letter-spacing:2px;text-transform:uppercase;color:#ffffff;font-weight:600;">Welcome Aboard</h1>
-              </td>
-            </tr>
-
-            <!-- Intro -->
-            <tr>
-              <td style="padding:40px 40px 32px 40px;">
-                <p style="margin:0 0 16px 0;font-size:16px;line-height:1.6;">Hi ${userName},</p>
-                <p style="margin:0 0 16px 0;font-size:16px;line-height:1.6;color:#333333;">
-                  Thanks for joining us. Your account is all set — you can now browse listings, book your next stay and manage your reservations from one place.
-                </p>
-                <p style="margin:0;font-size:16px;line-height:1.6;color:#333333;">
-                  We're glad to have you here.
                 </p>
               </td>
             </tr>
