@@ -1,8 +1,6 @@
 import { NotificationJobPayload } from "../events.js";
-import {
-  findListingById,
-  NotificationDocumentPayload,
-} from "../mongo/repository.js";
+import { findListingById } from "../mongo/listings.mongo.js";
+import { NotificationDocumentPayload } from "../mongo/notifications.mongo.js";
 import { notificationContent } from "./content.js";
 
 // The listing shape findListingById returns (a Mongo doc with a stringified

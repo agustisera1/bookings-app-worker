@@ -1,7 +1,8 @@
 import { Job } from "bullmq";
 import { NotificationJobPayload } from "../events.js";
-import { findListingById, insertNotification } from "../mongo/repository.js";
-import { findUserById } from "../pg/repository.js";
+import { findListingById } from "../mongo/listings.mongo.js";
+import { insertNotification } from "../mongo/notifications.mongo.js";
+import { findUserById } from "../pg/users.pg.js";
 import { channels, publish } from "../redis/client.js";
 import { buildNotification } from "../notifications/build-notification.js";
 import { createProcessor } from "./dispatch.js";
