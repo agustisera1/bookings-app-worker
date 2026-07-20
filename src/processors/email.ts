@@ -17,12 +17,8 @@ const emailFrom = process.env.EMAIL_FROM ?? "onboarding@resend.dev";
 // In dev every email is redirected here instead of the real recipient.
 const devEmailTo = process.env.DEV_EMAIL_TO ?? "agustisera1@gmail.com";
 
-// Resend never throws on a rejected send: it resolves to `{ data, error }`. A
-// handler that only logs that error resolves normally, so BullMQ marks the job
-// completed and never retries it — the whole point of the queue. Turning the
-// error into a throw is what makes delivery at-least-once.
-//
-// The options type is derived from the SDK so this stays correct across upgrades.
+// Resend no lanza ante un envío rechazado: resuelve a `{ data, error }`. Sin este
+// throw el job resuelve OK y BullMQ lo marca completed, así que nunca reintenta.
 async function sendEmail(
   label: string,
   options: Parameters<typeof resend.emails.send>[0],
@@ -31,8 +27,7 @@ async function sendEmail(
 
   if (error) {
     console.error(`[${label}]: send rejected by Resend`, error);
-    // Wrapped in a real Error: BullMQ stores `failedReason` from `.message`, and
-    // Resend's error is a plain object with no stack. `cause` keeps the original.
+    // Error real, no el objeto plano de Resend: BullMQ lee `failedReason` de `.message`.
     throw new Error(`[${label}]: ${error.message}`, { cause: error });
   }
 
