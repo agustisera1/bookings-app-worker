@@ -1,6 +1,6 @@
 import type { Socket } from "socket.io";
 import type { MessageDocument } from "../mongo/messages.mongo.js";
-import { CurrentUser } from "./auth.js";
+import type { CurrentUser, ChatParties } from "./auth.js";
 
 // The persisted + delivered message shape lives with the Mongo repository (the
 // storage owner), same as NotificationDocumentPayload. Re-exported here so the
@@ -8,16 +8,20 @@ import { CurrentUser } from "./auth.js";
 export type { MessageDocument };
 
 // What a client sends on `events.clientMessage`: only the room and the body.
-// The server stamps _id, sender_id (from the authenticated socket) and
-// timestamp before persisting — clients don't get to set those.
+// The server stamps _id, sender_id (from the join ticket) and timestamp before
+// persisting — clients don't get to set those.
 export type ClientMessage = {
   chat_id: string;
   body: string;
 };
 
-// Attached to socket.data by the handshake auth middleware (step 1); undefined
-// until a socket has authenticated.
-export type SocketData = { user?: CurrentUser };
+// `user`: attached by the handshake middleware (step 1). `rooms`: the verified
+// ticket parties per joined chat, keyed by chat_id — one singleton socket serves
+// every conversation, so the sender check looks up the room a message targets.
+export type SocketData = {
+  user?: CurrentUser;
+  rooms: Map<string, ChatParties>;
+};
 
 // A socket carrying our authenticated-user data. `any` on the event maps keeps
 // the focus on socket.data without enumerating every client/server event.
