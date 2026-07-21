@@ -1,7 +1,6 @@
 import type { PgUser } from "../pg/index.js";
+import type { BookingParty } from "../events.js";
 import type { AppSocket } from "./types.js";
-import { findChatParties, isParty } from "./parties.js";
-import { Cookies, parseCookie } from "cookie";
 import jwt from "jsonwebtoken";
 
 export type Role = "guest" | "host";
@@ -12,6 +11,16 @@ export type CurrentUser = Pick<PgUser, "email" | "name" | "is_host"> & {
   user_id: string;
   permissions: string[];
   roles: Role[];
+};
+
+// Both party ids of a booking's chat plus which side the ticket holder is. The
+// app signs this whole object into the join ticket. Mirrors ChatParties in
+// bookings_app/lib/types/booking.ts — replicated by hand, same as the payloads.
+export type ChatParties = {
+  chat_id: string;
+  host_id: string;
+  guest_id: string;
+  current_party: BookingParty | null;
 };
 
 const JWT_SECRET = process.env.JWT_SECRET!;
@@ -29,8 +38,7 @@ export async function authenticateHandshake(
   next: (err?: Error) => void,
 ) {
   try {
-    const cookies: Cookies = parseCookie(socket.handshake.headers.cookie ?? "");
-    const token = cookies["token"];
+    const token = socket.handshake.auth.token;
     if (!token) return next(new Error("Token not provided"));
     const user = verifyToken(token);
     socket.data.user = user as CurrentUser;
@@ -40,26 +48,28 @@ export async function authenticateHandshake(
   }
 }
 
-// Step 2 — Join Room: Authorize.
-// A booking's id doubles as its chat room id. Decide whether `user` is a party
-// to booking `chatId` and may join its room. Pure check — no side effects; the
-// caller runs socket.join on success.
-export async function authorizeRoom(
-  chatId: string,
-  user?: CurrentUser,
-): Promise<boolean> {
-  if (!user) {
-    console.error("[authorizeRoom]: no user provided");
-    return false;
+// Step 2 — Join Room: Authorize. The ticket is a signed ChatParties the app
+// minted after running the rule; the worker only verifies its signature and
+// that it names a party — no PG, no Mongo, no rule. The room to join is the
+// ticket's own chat_id. Returns the parties to store, or null to refuse.
+export function authorizeRoom(ticket?: string): ChatParties | null {
+  if (!ticket) {
+    console.error("[authorizeRoom]: no ticket provided");
+    return null;
   }
 
-  const parties = await findChatParties(chatId);
-  if (!parties) {
-    console.error("[authorizeRoom]: no booking matches chat", chatId);
-    return false;
+  let parties: ChatParties;
+  try {
+    parties = verifyToken(ticket) as ChatParties;
+  } catch {
+    console.error("[authorizeRoom]: invalid or expired ticket");
+    return null;
   }
 
-  // Note it checks *this* booking's parties — being a host grants nothing on
-  // bookings that aren't yours.
-  return isParty(parties, user.user_id);
+  if (!parties.current_party) {
+    console.error("[authorizeRoom]: ticket names no party", parties.chat_id);
+    return null;
+  }
+
+  return parties;
 }

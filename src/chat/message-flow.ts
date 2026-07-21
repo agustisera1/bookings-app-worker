@@ -1,6 +1,5 @@
 import * as chatsRepo from "../mongo/chats.mongo.js";
 import { insertMessage } from "../mongo/messages.mongo.js";
-import { findChatParties, isParty } from "./parties.js";
 import {
   AppSocket,
   ClientMessage,
@@ -22,37 +21,26 @@ export function registerMessageFlow(socket: AppSocket) {
   socket.on(
     EVENTS.CLIENT_MESSAGE,
     async (payload: ClientMessage, ack?: (res: MessageAck) => void) => {
-      const senderId = socket.data.user?.user_id;
-      if (!senderId) {
-        console.error("[registerMessageFlow]: unauthenticated socket");
-        return ack?.({ ok: false });
-      }
-
-      // Step 3 — Emit: a client message arrived. Resolve both sides of the
-      // booking before touching anything: it authorizes the sender and supplies
-      // the ids the chat document needs.
-      const parties = await findChatParties(payload.chat_id);
+      // Step 3 — Emit: a client message arrived. The parties stored at join are
+      // the authorization: no entry for this room means the socket never joined
+      // it (or its ticket expired), so there's nothing to emit into.
+      const parties = socket.data.rooms.get(payload.chat_id);
       if (!parties) {
         console.error(
-          "[registerMessageFlow]: no booking matches chat",
+          "[registerMessageFlow]: no authorized room for",
           payload.chat_id,
         );
         return ack?.({ ok: false });
       }
 
-      // Joining the room was authorized, but nothing stops a socket from
-      // emitting for a room it never joined — so the sender is checked here too.
-      if (!isParty(parties, senderId)) {
-        console.error(
-          "[registerMessageFlow]: sender is not a party to",
-          payload.chat_id,
-        );
-        return ack?.({ ok: false });
-      }
+      // The sender is whichever party the ticket was issued to — the client is
+      // never trusted to name it.
+      const senderId =
+        parties.current_party === "guest" ? parties.guest_id : parties.host_id;
 
       // The chat document is born with the first message, not with the booking:
       // a pending booking can carry questions before the host confirms it. Both
-      // party ids come from `parties`, so it doesn't matter which side speaks
+      // party ids come from the ticket, so it doesn't matter which side speaks
       // first — writing the sender into `guest_id` would be wrong half the time.
       await chatsRepo.upsertChatByBookingId(payload.chat_id, {
         booking_id: payload.chat_id,

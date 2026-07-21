@@ -31,25 +31,27 @@ export const io = new Server<any, any, any, SocketData>({
 io.use(authenticateHandshake);
 
 io.on("connection", (socket) => {
-  // Step 2 — Join Room: Authorize. A booking's id doubles as its chat room id.
-  // It can't ride the handshake: the socket connects once, while the client
-  // learns (and changes) which booking it shows afterwards. So the join is its
-  // own event — the handshake authenticates *who*, this authorizes *what*.
-  // The reply goes through `ack`, the callback the client passes last on emit;
-  // returning a value from the handler is not an ack and reaches no one.
+  socket.data.rooms = new Map();
+
+  // Step 2 — Join Room: Authorize. The join can't ride the handshake: the socket
+  // connects once, while the client learns (and changes) which booking it shows
+  // afterwards. The handshake authenticates *who*; the ticket authorizes *what*,
+  // and names its own room. On success the parties are stashed per room for the
+  // message flow to reuse.
   socket.on(
     EVENTS.JOIN_CHAT,
-    async (chatId: string, ack?: (res: JoinAck) => void) => {
-      const user = socket.data.user;
-      const authorized = await authorizeRoom(chatId, user);
-      if (!authorized) return ack?.({ ok: false });
-      socket.join(chatId);
+    (ticket: string, ack?: (res: JoinAck) => void) => {
+      const parties = authorizeRoom(ticket);
+      if (!parties) return ack?.({ ok: false });
+      socket.join(parties.chat_id);
+      socket.data.rooms.set(parties.chat_id, parties);
       ack?.({ ok: true });
     },
   );
 
   socket.on(EVENTS.LEAVE_CHAT, (chatId: string) => {
     socket.leave(chatId);
+    socket.data.rooms.delete(chatId);
   });
 
   // Steps 3–5: emit → persist → deliver.
