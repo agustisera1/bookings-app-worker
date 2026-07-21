@@ -1,7 +1,6 @@
 import type { PgUser } from "../pg/index.js";
 import type { BookingParty } from "../events.js";
 import type { AppSocket } from "./types.js";
-import { Cookies, parseCookie } from "cookie";
 import jwt from "jsonwebtoken";
 
 export type Role = "guest" | "host";
@@ -39,8 +38,7 @@ export async function authenticateHandshake(
   next: (err?: Error) => void,
 ) {
   try {
-    const cookies: Cookies = parseCookie(socket.handshake.headers.cookie ?? "");
-    const token = cookies["token"];
+    const token = socket.handshake.auth.token;
     if (!token) return next(new Error("Token not provided"));
     const user = verifyToken(token);
     socket.data.user = user as CurrentUser;
